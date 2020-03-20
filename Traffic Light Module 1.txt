@@ -1,0 +1,239 @@
+/*
+ * post a.c
+ *
+ * Created: 1/28/2020 8:54:18 AM
+ * Author : Lakshitha Samod
+ */ 
+
+#define F_CPU 8000000UL // define cpu frequncy for the Atmega chip
+#include <avr/io.h>		// input output header file
+#include <util/delay.h>	// delay header file
+#include <avr/interrupt.h>	// interrupt header file
+#include <stdlib.h>	// standard library header file
+#include <stdio.h>
+#define  Trigger_pin PD2	/* Ultrasonic sensor ; Trigger pin -> PD2  , Echo pin -> PD6 */
+#define USART_BAUDRATE 9600
+#define BAUD_PRESCALE (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
+
+int TimerOverflow = 0;
+
+ISR(TIMER1_OVF_vect)
+{
+	TimerOverflow++;	/* Increment Timer Overflow count */
+}
+
+
+void UART_init(void)
+{
+	UBRRH = (BAUD_PRESCALE >> 8);	/* Load upper 8-bits*/
+	UBRRL = BAUD_PRESCALE;		/* Load lower 8-bits of the baud rate value */
+	UCSRB |= (1 << RXEN) | (1 << TXEN);	/* Turn on transmission and reception */
+	UCSRC |= (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1);	/* Use 8-bit character sizes */
+}
+
+unsigned char UART_RxChar_repeat(void)
+{
+	int cnt=1;
+	while ((UCSRA & (1 << RXC)) == 0)/* Wait till data is received */
+	{
+		cnt++;
+		if (cnt>5000)
+		{
+			break;
+		}
+	}
+	return UDR;			/* Return the byte*/
+}
+
+unsigned char UART_RxChar(void)
+{
+	while ((UCSRA & (1 << RXC)) == 0);/* Wait till data is received */
+	return UDR;			/* Return the byte*/
+}
+
+void UART_TxChar(uint8_t data)
+{
+	while (! (UCSRA & (1<<UDRE)));	/* Wait for empty transmit buffer*/
+	UDR = data ;
+}
+
+int main(void)
+{
+	char RecievedByte;
+	UART_init();
+	long count;
+	double distance;
+	DDRD = 0b00000100 ;		/* Make trigger pin(PD0) as output from Ultrasonic Sensor */
+	PORTD = 0xFF;		/* Turn on Pull-up */
+	
+	DDRB=0xFF;	//Make all pins in port B as outputs for lights and buzzer
+	
+	DDRC = 0x01; //Makes PC0 output pin of Servo(yellow) red-vcc
+	
+	DDRA &= ~(1<<PA0); //Makes first pin  of PORTA input from Push Button
+	
+	sei();			/* Enable global interrupt */
+	TIMSK = (1 << TOIE1);	/* Enable Timer1 overflow interrupts */
+	TCCR1A = 0;		/* Set all bit to zero Normal operation */
+
+	while(1) //make this as an infinite loop
+	{
+		
+			
+			void allow_cross()
+			{
+				PORTB=0B10000001;	//orange light for vehicles to inform to get ready for stop & still red for pedestrian
+				
+				_delay_ms(5000);	//wait for 5 seconds
+
+				PORTB=0B01000000;	//red light for stop vehicles
+				
+				_delay_ms(5000);	//wait for 5 seconds
+
+				PORTB=0B01000110;	//still red light for stop vehicles & buzzer & green light for pedestrian to cross
+
+				//Rotate Motor to 90 degree
+				PORTC = 0x01;
+				_delay_us(1700);
+				PORTC = 0x00;
+				
+				_delay_ms(1000);	//wait for 2000 mili seconds
+				
+				int i;	//loop control variable
+
+				for (i=1;i<=10;i++)	//loop for blink green light for pedestrian to inform still they can cross while red light is always on for vehicles
+				{
+					PORTB=0B01000010;	//still red light for vehicles & on green for pedestrian
+
+					_delay_ms(1000);		//wait for 500 mili seconds
+
+					PORTB=0B01000000;	//still red light for vehicles & off green for pedestrian
+
+					_delay_ms(1000);		//wait for 500 mili seconds
+				}
+				
+				PORTB=0B10000010;	//orange light for ready vehicles to go & red for stop pedestrian
+				
+				//Rotate Motor to -90 degree
+				PORTC = 0x01;
+				_delay_us(730);
+				PORTC = 0x00;
+
+				_delay_ms(5000);	//wait for 5 seconds
+				
+				PORTB=0B00100001;	//green light for inform vehicles to go & still red for pedestrian
+				
+				_delay_ms(10000);	//wait for 10 seconds
+			}
+
+			
+			
+			void read_ultra()
+			{
+				/* Give 10us trigger pulse on trig. pin to HC-SR04 */
+				PORTD |= (1 << Trigger_pin);
+				_delay_us(10);
+				PORTD &= (~(1 << Trigger_pin));
+				
+				TCNT1 = 0;	/* Clear Timer counter */
+				TCCR1B = 0x41;	/* Capture on rising edge, No prescaler*/
+				TIFR = 1<<ICF1;	/* Clear ICP flag (Input Capture flag) */
+				TIFR = 1<<TOV1;	/* Clear Timer Overflow flag */
+
+				/*Calculate width of Echo by Input Capture (ICP) */
+				
+				while ((TIFR & (1 << ICF1)) == 0);/* Wait for rising edge */
+				TCNT1 = 0;	/* Clear Timer counter */
+				TCCR1B = 0x01;	/* Capture on falling edge, No prescaler */
+				TIFR = 1<<ICF1;	/* Clear ICP flag (Input Capture flag) */
+				TIFR = 1<<TOV1;	/* Clear Timer Overflow flag */
+				TimerOverflow = 0;/* Clear Timer overflow count */
+
+				while ((TIFR & (1 << ICF1)) == 0);/* Wait for falling edge */
+				count = ICR1 + (65535 * TimerOverflow);	/* Take count */
+				/* 8MHz Timer freq, sound speed =343 m/s */
+				distance = (double)count / 466.47;
+			}
+
+			_delay_ms(200);
+			
+			
+			
+			/*
+				for vehicle:	PB7 -> orange light
+								PB6 -> red light
+								PB5 -> green light
+								
+
+				for pedestrian:	PB2 -> buzzer
+								PB1 -> green light
+								PB0 -> red light
+								
+				01234567
+								*/
+
+			if(PINA==0x00)//if switch is pressed from side A (this side)
+			{
+				_delay_ms(100);	// for debouncing of switch
+				UART_TxChar('p');
+				for(int i=1;i<=5;i++)
+				{
+					_delay_ms(200); 
+					read_ultra();
+					if(!(distance<=0b00101000))		//if not detect
+					{
+						UART_TxChar('n');
+					}
+					
+					else	//if detect
+					{
+						UART_TxChar('y');
+					}
+					RecievedByte=UART_RxChar();
+					if(RecievedByte=='a')		//if not detect from both sides
+					{
+						allow_cross();
+						break;
+					}
+					_delay_ms(3700);
+				}
+			}
+			
+			
+			
+			else if(UART_RxChar_repeat()=='s')//if switch is pressed from side B (other side)
+			{
+				for(int i=1;i<=5;i++)
+				{
+					_delay_ms(200); 
+					read_ultra();
+					if(!(distance<=0b00101000))		//if not detect
+					{
+						UART_TxChar('n');
+					}
+					
+					else					// if detect
+					{
+						UART_TxChar('y');
+					}
+					
+					RecievedByte=UART_RxChar();
+					if(RecievedByte=='a')		//if not detect from both sides
+					{
+						allow_cross();
+						break;
+					}
+					_delay_ms(3800);
+				}
+			}
+			
+			
+			if(RecievedByte=='b') //if vehicles come always in above checking loop
+			{
+				_delay_ms(6000);
+				allow_cross();
+			}
+			
+			RecievedByte='k';
+	}
+}
