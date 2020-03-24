@@ -1,10 +1,3 @@
-/*
- * post b.c
- *
- * Created: 1/28/2020 8:54:18 AM
- * Author : Lakshitha Samod
- */ 
-
 #define F_CPU 8000000UL // define cpu frequncy for the Atmega chip
 #include <avr/io.h>		// input output header file
 #include <util/delay.h>	// delay header file
